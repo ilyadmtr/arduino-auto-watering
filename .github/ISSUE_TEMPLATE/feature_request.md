@@ -11,10 +11,10 @@ assignees: ilyadmtr
 
 **Acceptance Criteria:**
 
-- [] 
+- [ ] 
 
 **Technologies:**
 
 **Subtasks:**
 
-- []
+- [ ]
