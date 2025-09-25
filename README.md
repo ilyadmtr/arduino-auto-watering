@@ -12,3 +12,5 @@ This project is the firmware and software for a smart plant watering system base
 ## Firmware
 A test project for the YL-69 soil moisture sensor is available in:
 [moisture_sensor](moisture_sensor/moisture_sensor_test.ino)
+A reset project for resetting the Arduino is available in:
+[reset](reset/reset.ino)
