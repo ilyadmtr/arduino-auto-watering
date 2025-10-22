@@ -10,8 +10,10 @@ This project is the firmware and software for a smart plant watering system base
 - ESP-01S Wi-Fi module (planned)
 
 ## Firmware
-A test project for the YL-69 soil moisture sensor is available in: [moisture_sensor](moisture_sensor/moisture_sensor_test.ino)  
-A reset project for resetting the Arduino is available in:
-[reset](reset/reset.ino)  
-A project for measuring input voltage using a sensor is available in (use port A0 because the other analog inputs are floating):
+- A reset project for resetting the Arduino is available in:
+  [reset](reset/reset.ino)
+- A test project for the YL-69 soil moisture sensor is available in: [moisture_sensor](moisture_sensor/moisture_sensor_test.ino)
+  - Schema: ![moisture sensor](moisture_sensor/moisture_sensor_schema.png)
+- A project for measuring input voltage using a sensor is available in (use port A0 because the other analog inputs are floating):
 [voltage_sensor](voltage_measurement_sensor/voltage_measurement_sensor.ino)
+  - Schema: ![voltage sensor](voltage_measurement_sensor/voltage_sensor_schema.png)
