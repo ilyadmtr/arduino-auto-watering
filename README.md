@@ -20,3 +20,4 @@ This project is the firmware and software for a smart plant watering system base
 - A project fot testing the wi-fi module ESP-01S is available in: [wifi-module](wifi-module/wifi-module.ino)
   - Schema: ![wifi module](wifi-module/wifi-module.png)
 - A project for testing the wi-fi module ESP-01S with RemoteXY requests is available in: [wifi-module-with-remotexy](wifi-module-with-remotexy/wifi-module-with-remotexy.ino)
+- The project's core schema: ![core_schema](core_schema/core_schema.png)
