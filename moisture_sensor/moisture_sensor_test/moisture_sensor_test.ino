@@ -1,70 +1,181 @@
-// Пины
-const int sensorPower = 7;   // Пин, который подаёт питание на датчик
-const int sensorPin   = A0;  // Аналоговый пин для считывания влажности
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include <Arduino_JSON.h>
 
-// Режим работы
-bool continuousMode = false;  
 
-// Калибровка
-const int dryValue = 1023;   // значение в сухой земле
-const int wetValue = 300;   // значение в воде
+// Moisture Sensor
+const int MOISTURE_SENSOR_PIN = A0; // Analog pin for moisture sensor
+const int MOISTURE_POWER_PIN = 7;            // Digital pin to power the sensor
+const int DRY_VALUE = 1023;          // Value when the sensor is dry
+const int WET_VALUE = 300;             // Value when the sensor is wet
 
-void setup() {
-  Serial.begin(9600);
-  pinMode(sensorPower, OUTPUT);
-  digitalWrite(sensorPower, LOW); // по умолчанию питание выключено
+// Pump
+const int PUMP_POWER_PIN = 4;              // Digital pin to control the pump
 
-  Serial.println("Soil moisture sensor ready.");
-  Serial.println("Commands:");
-  Serial.println("  R - read once");
-  Serial.println("  C - continuous mode");
-  Serial.println("  S - stop continuous mode");
+//WiFi Module
+const int ESP_RX_PIN = 2;         // RX pin of ESP8266
+const int ESP_TX_PIN = 3;         // TX pin of ESP8266
+#define ESP_BAUD_RATE 115200     // Baud rate for ESP8266 communication
+
+SoftwareSerial espSerial(ESP_RX_PIN, ESP_TX_PIN); // RX, TX
+
+//WiFi Credentials
+const char* WIFI_SSID = "MagentaWLAN-6MWQ";
+const char* WIFI_PASSWORD = "88162463653329849828";
+
+//Backend Server
+const char* SERVER_IP = "192.168.2.49"; // Backend server IP
+const int SERVER_PORT = 8080;        // Backend server port
+const char* API_PATH_DATA = "/api/data"; // Endpoint to send sensor data
+const char* API_PATH_CMD = "/api/command"; // Endpoint to receive commands
+
+int readMoisturePercent() {
+  digitalWrite(MOISTURE_POWER_PIN, HIGH); // Power the moisture sensor
+  delay(300); // Allow sensor to stabilize
+  int sensorValue = analogRead(MOISTURE_SENSOR_PIN);
+  digitalWrite(MOISTURE_POWER_PIN, LOW); // Turn off the sensor to save power
+  sensorValue = constrain(sensorValue, WET_VALUE, DRY_VALUE);
+  int moisturePercent = map(sensorValue, WET_VALUE, DRY_VALUE, 100, 0);
+  return moisturePercent;
 }
 
-int readSoilMoistureRaw() {
-  digitalWrite(sensorPower, HIGH);   // включаем питание
-  delay(300);                        // ждём стабилизацию
-  int value = analogRead(sensorPin); // считываем показание
-  digitalWrite(sensorPower, LOW);    // отключаем питание
-  return value;
+void controlPump(bool state) {
+  digitalWrite(PUMP_POWER_PIN, state ? LOW : HIGH);
 }
 
-
-int convertToPercent(int rawValue) {
-  // Чем суше почва, тем выше rawValue
-  int percent = map(rawValue, dryValue, wetValue, 0, 100);
-  // Ограничим диапазон
-  if (percent < 0) percent = 0;
-  if (percent > 100) percent = 100;
-  return percent;
+void sendATCommand(String command, const int timeout){
+  espSerial.println(command);
+  long int time = millis();
+  while( (time + timeout) > millis()){
+    while(espSerial.available()){
+      char c = espSerial.read();
+      Serial.write(c);
+    }
+  }
 }
 
-void loop() {
-  // Проверяем входящие команды
-  if (Serial.available() > 0) {
-    char cmd = Serial.read();
-    if (cmd == 'R') {
-      int raw = readSoilMoistureRaw();
-      int moisturePercent = convertToPercent(raw);
-      Serial.print("Soil moisture: ");
-      Serial.print(moisturePercent);
-      Serial.println("%");
-    } else if (cmd == 'C') {
-      continuousMode = true;
-      Serial.println("Continuous mode enabled.");
-    } else if (cmd == 'S') {
-      continuousMode = false;
-      Serial.println("Continuous mode stopped.");
+void sendDataToServer(int moisture){
+  // Prepare JSON payload
+  String jsonPayload = "{\"moisture\":" + String(moisture) + "}";
+
+  // Prepare HTTP POST request
+  String postRequest = "POST " + String(API_PATH_DATA) + " HTTP/1.1\r\nHost: " + String(SERVER_IP) + ":" + String(SERVER_PORT) + "\r\nContent-Type: application/json\r\nContent-Length: " + String(jsonPayload.length()) + "\r\n\r\n" + jsonPayload;
+
+  // Establish TCP connection
+  sendATCommand("AT+CIPSTART=\"TCP\",\"" + String(SERVER_IP) + "\"," + String(SERVER_PORT), 2000);
+
+  // Send POST request
+  sendATCommand("AT+CIPSEND=" + String(postRequest.length()), 2000);
+  espSerial.readStringUntil('>'); // Wait for '>' prompt
+  espSerial.print(postRequest);
+  
+  // Close connection
+  sendATCommand("AT+CIPCLOSE", 2000);
+}
+
+String checkServerResponse(){
+  // Read response from ESP8266
+  String response = "";
+  long int time = millis();
+
+  while (millis() - time < 5000) {
+    if (espSerial.available()) {
+      response += (char)espSerial.read();
+      delay(1); 
     }
   }
 
-  // Если включен циклический режим
-  if (continuousMode) {
-    int raw = readSoilMoistureRaw();
-    int moisturePercent = convertToPercent(raw);
-    Serial.print("Soil moisture: ");
-    Serial.print(moisturePercent);
-    Serial.println("%");
-    delay(2000); // замер каждые 2 секунды
+  // Parse HTTP response to extract JSON payload
+  int jsonStart = response.indexOf("\r\n\r\n");
+  
+  // Check if the end of headers was found
+  if (jsonStart == -1) {
+    Serial.println("ERROR: Could not find end of HTTP headers.");
+    return "NONE"; 
+  }
+  
+  // Extract JSON payload
+  String jsonPayload = response.substring(jsonStart + 4);
+
+  // Parse JSON payload
+  StaticJsonDocument<100> doc;
+  DeserializationError error = deserializeJson(doc, jsonPayload);
+
+  // Check for parsing errors
+  if (error) {
+    Serial.print("JSON Parsing failed: ");
+    Serial.println(error.f_str());
+    return "NONE"; // Ошибка парсинга
+  }
+
+  // Extract command from JSON
+  if (doc.containsKey("action")) {
+    String action = doc["action"].as<String>();
+    Serial.print("Server Command Received: ");
+    Serial.println(action);
+    return action;
+  }
+  
+  return "NONE";
+}
+
+String getServerCommand(){
+  String command = "NONE";
+
+  // Establish TCP connection
+  sendATCommand("AT+CIPSTART=\"TCP\",\"" + String(SERVER_IP) + "\"," + String(SERVER_PORT), 2000);
+
+  // Prepare GET request
+  String getRequest = "GET " + String(API_PATH_CMD) + " HTTP/1.1\r\nHost: " + String(SERVER_IP) + ":" + String(SERVER_PORT) + "\r\n\r\n";
+
+  // Send GET request
+  sendATCommand("AT+CIPSEND=" + String(getRequest.length()), 2000);
+  espSerial.readStringUntil('>'); // Wait for '>' prompt
+  espSerial.print(getRequest);
+
+  // Check server response
+  command = checkServerResponse();
+
+  // Close connection
+  sendATCommand("AT+CIPCLOSE", 2000);
+
+  return command;
+}
+
+void setup() {
+  pinMode(MOISTURE_POWER_PIN, OUTPUT);
+  digitalWrite(MOISTURE_POWER_PIN, LOW); // Ensure sensor is off initially
+
+  pinMode(PUMP_POWER_PIN, OUTPUT);
+  digitalWrite(PUMP_POWER_PIN, HIGH); // Ensure pump is off initially
+
+  pinMode(MOISTURE_SENSOR_PIN, INPUT);
+
+  Serial.begin(9600);
+  espSerial.begin(ESP_BAUD_RATE);
+}
+
+void loop() {
+  delay(30000); // Wait between readings
+  
+  int moisture = readMoisturePercent();
+  Serial.print("Soil Moisture: ");
+  Serial.print(moisture);
+  Serial.println("%");
+
+  sendDataToServer(moisture);
+
+  String command = getServerCommand();
+
+  if(command == "WATER_ON"){
+    Serial.println("Activating Pump");
+    controlPump(true);
+  } else if(command == "WATER_OFF"){
+    Serial.println("Deactivating Pump");
+    controlPump(false);
+  } else {
+    Serial.println("No valid command received.");
   }
 }
+
+
